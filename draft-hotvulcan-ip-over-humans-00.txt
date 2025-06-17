@@ -1,0 +1,614 @@
+# IP over Humans (IPoH)
+
+
+
+## Abstract
+
+
+
+This document describes **IP over Humans (IPoH)**, a method for transmitting Internet Protocol (IP) datagrams using human couriers as the physical transport medium. In this architecture, IP packets are encapsulated into physical storage devices (or other portable media) that are carried by humans from source to destination. The document outlines the design considerations for IPoH, including encapsulation of packets on storage media, fragmentation and reassembly of large datagrams, routing of packets via human relays, a redefinition of Time to Live (TTL) in a physical delivery context, delivery confirmation mechanisms, and security considerations. The goal is to provide a framework for an extremely delay-tolerant network using people as “links,” in a manner consistent with the Internet Protocol’s principles (albeit with **very** high latency and unconventional delivery). 
+
+
+
+## Status of This Memo
+
+
+
+This memo provides information for the Internet community. It does not specify an Internet standard of any kind. Distribution of this memo is unlimited.
+
+
+
+## Table of Contents
+
+
+
+* 1. **Introduction**
+
+* 2. **Protocol Overview**
+
+* 3. **Packet Transmission**
+
+* 4. **Fragmentation**
+
+* 5. **Routing**
+
+* 6. **TTL (Time to Live) Considerations**
+
+* 7. **Delivery Confirmation**
+
+* 8. **Security Considerations**
+
+* 9. **IANA Considerations**
+
+* 10. **References**
+
+
+
+## 1. Introduction
+
+
+
+The concept of physically transporting data packets by human couriers is an extension of both traditional *sneakernet* practices and earlier whimsical proposals in networking literature. In sneakernet (an informal term for manual data transfer), data is moved by carrying storage media from one machine to another, rather than sent over a live network. As famously noted by Andrew Tanenbaum, one should "never underestimate the bandwidth of a station wagon full of tapes hurtling down the highway," emphasizing that a physically transported storage device can carry a vast amount of data, albeit with high latency. Building on this insight, IP over Humans (IPoH) treats human carriers as a physical layer for the Internet Protocol.
+
+
+
+IPoH draws inspiration from prior experiments like IP over Avian Carriers (IPoAC), where birds (e.g., homing pigeons) carry data **packets** in a similar fashion. While IPoAC was introduced humorously in RFC 1149 and later updated in RFC 2549 with Quality of Service considerations, IPoH repurposes the idea for human couriers. Humans offer certain advantages over avian carriers: they can carry larger volumes of data (via bigger storage devices), follow complex instructions, and travel to fixed addresses. However, humans are also subject to schedules, fatigue, and other constraints, making the network characteristics of IPoH unique (e.g., extremely high delay, potentially high throughput per trip, and very sparse or scheduled connectivity).
+
+
+
+This document specifies the architecture and protocol adaptations needed to use human beings as carriers for IP datagrams. The core idea is that an IP packet can be encapsulated onto a physical medium (such as a USB flash drive, memory card, or printed paper) which a person physically transports to the packet’s next hop or final destination. Standard IP concepts like fragmentation, routing, and TTL must be reinterpreted or adjusted in this context. Likewise, new considerations arise for confirming delivery and ensuring security when data literally walks out the door in someone’s hands.
+
+
+
+This proposal is primarily informational and somewhat experimental in nature. While it is written with a technical tone, it subtly acknowledges the absurdity and challenges of such a transmission method. Nevertheless, it can be applicable in niche scenarios: for example, extremely disconnected environments, data mule applications, or emergency situations where electronic networks are unavailable but physical transport is feasible. The following sections detail the protocol design.
+
+
+
+## 2. Protocol Overview
+
+
+
+At a high level, IP over Humans (IPoH) operates by inserting a human-carried **physical transport segment** into the internetworking path. In a typical IP network, packets travel over links such as Ethernet cables, fiber optics, or wireless radio waves. In IPoH, the “link” is a human who carries the data. The architecture therefore introduces a new kind of link layer beneath the IP layer: one could refer to it as a **Human Delivery Layer**.
+
+
+
+**Encapsulation:** An IP datagram (IPv4 or IPv6 packet) is encapsulated for physical transport by writing its content to a portable storage medium. This medium acts as the **frame** carrying the IP packet as payload. Various media can be used, for example: a USB flash drive, an SD memory card, a portable hard disk, an optical disc, or even paper (by printing the packet in a human-readable encoding such as hex or base64). The choice of medium may depend on the size of the packet, the available technology, and environmental considerations (e.g., weather-proof packaging for the medium if the human travels outdoors). The encapsulation process includes preserving the IP header and data exactly as is – the IP packet is not modified, only stored. In essence, the storage device with the data acts like a very large MTU network frame.
+
+
+
+**Transmission:** Once encapsulated, the storage medium is handed over to a human courier. This person is instructed to travel to the packet’s destination or to an intermediate node (as determined by routing, see Section 5). Upon arrival, the data is decapsulated: the IP packet is read from the storage medium and handed to the destination host’s network stack (or forwarded on). At the destination, from the network stack’s perspective, it receives an IP packet just as if it had arrived on a normal interface – except the **latency** might be hours or days, and the throughput is measured in bytes per trip rather than bytes per second.
+
+
+
+**Overall Architecture:** The overall design maintains the layering of the Internet model:
+
+
+
+* The **Network Layer** (IP) remains responsible for addressing and end-to-end delivery logic. IP headers (addresses, protocol fields, etc.) stay intact throughout the human-carried journey.
+
+* The **Link Layer** in this context is a human-transport link. We can consider the process of giving a storage device to a human and later retrieving it as analogous to a very slow link-layer protocol. There may need to be a minimal **link header** to facilitate handling (for example, an address label on the package or a docket for the courier), but in many cases the “link” can be managed out-of-band (the courier knows where to go via instructions).
+
+* Higher layers (transport, application) are unaffected except for the extreme delays and potential disruption in connectivity. They can run over IPoH as they would over any IP path, though timeouts and throughput assumptions in those protocols may need adjustment.
+
+
+
+This architecture allows IP connectivity in situations where direct electronic communication is impossible or impractical. It leverages human mobility to bridge networks that have no physical or radio links. The following sections detail specific aspects: how packets are transmitted via humans, how large packets are split and reassembled, how routes are determined, how TTL is handled, how delivery is confirmed, and security issues.
+
+
+
+## 3. Packet Transmission
+
+
+
+To send an IP packet via IPoH, the source host or router must perform **physical encapsulation** of the packet onto a medium that a human can carry. The process is as follows:
+
+
+
+* **3.1. Encapsulation on Storage Medium:** The entire IP datagram (header and payload) is written to a storage device. The storage device may be:
+
+
+
+  * *Digital media:* e.g. a USB flash drive, memory card, or portable SSD. These can hold many megabytes or gigabytes, allowing multiple packets or very large packets to be stored.
+
+  * *Optical media:* a CD, DVD, Blu-ray, etc., if devices to read them are available at source and destination.
+
+  * *Printed form:* e.g. printing the hexadecimal representation or a QR code encoding of the packet on paper. This is more of a fallback and can be error-prone (requires scanning/OCR at the destination).
+
+  * *Other forms:* any method that can carry digital bits, such as writing to tape, punching into cards, or even verbal encoding (a highly patient courier memorizing bits, though this is not recommended for anything beyond very small packets).
+
+
+
+  The encapsulation includes any necessary metadata for the courier. For instance, one might attach a label or document to the medium indicating the **destination IP address** and possibly the physical address of the destination or next hop. The IP packet’s own header contains the IP addresses of source and destination hosts (and ports, etc., for the higher-layer protocol), but the human likely needs a real-world address or instructions (like a postal address or GPS coordinates) to know where to physically deliver it. This address mapping is part of routing (Section 5), but it is typically provided alongside the packet.
+
+
+
+* **3.2. Handover to Human Carrier:** A designated human courier is given the storage medium. This could be a professional courier, a volunteer, or even just the sender themselves carrying it partway. The role of the human is analogous to a data link: physically conveying the packet to the next point. The human might travel by foot, bicycle, car, airplane, etc., depending on distance and urgency. At this stage, the “packet” might be considered as “in transit” in the network.
+
+
+
+* **3.3. Transit and Handling:** During transit, the IP packet experiences a very high latency. The data rate is effectively the size of the packet divided by the travel time. For example, a 10 MB packet hand-carried over 10 kilometers might take 2 hours, yielding an effective data rate of about 1.4 kB/s – extremely slow in networking terms for latency, though the courier could carry much larger volumes of data at once. Indeed, one benefit of IPoH is that if you have to send a large amount of data (say terabytes), a person with a box of hard drives might **achieve a higher throughput** in terms of bytes per second over long distances than a conventional network link, even though the first byte arrives much later. This is the essence of the earlier station wagon anecdote.
+
+
+
+  The human should handle the storage medium carefully to avoid data loss (e.g., protecting it from extreme temperatures, magnetic fields if it’s magnetic media, or physical shocks). In a well-planned IPoH implementation, the courier might also carry spare power or interfaces (such as a USB battery pack if the drive requires power, or a laptop to read the data if needed). However, in most cases the courier does not need to interpret the data – they are effectively a “bit carrier.” It is recommended that couriers do **not** attempt to read or modify the data, maintaining the concept of a transparent link.
+
+
+
+* **3.4. Decapsulation at Destination:** Upon reaching the destination (which could be the final target host or an intermediate “hop”), the storage medium is delivered. The receiving entity then extracts (decapsulates) the IP datagram from the medium. This typically involves copying the file or data from the storage device into the destination system’s memory. The IP packet is then fed into the destination’s IP layer (for example, via a special network interface that represents the human-carried link). If the destination is the final IP receiver, the packet is delivered to the appropriate transport layer (TCP/UDP/etc.) as usual. If the destination is an intermediate router or hub, it will then process the packet and possibly prepare it for the next leg of its journey (which might be another human-carried segment or a normal electronic link).
+
+
+
+One can imagine a software interface on the sending and receiving hosts for IPoH – for instance, a **“HumanInterface0”** network adapter that queues outgoing packets for physical transport and reads incoming ones from physically delivered media. This interface could log when a packet was handed to a courier and when one arrived, for auditing and performance measurement (e.g., recording that a packet took 3 days to arrive).
+
+
+
+**Transmission Example:** To illustrate, suppose Host A wants to send a packet to Host B via IPoH. Host A creates the IP packet (say 1500 bytes) and writes it to a USB flash drive. A human runner is tasked with delivery; they pick up the drive, travel 5 km to Host B’s location, and hand it over. Host B reads the USB drive and obtains the 1500-byte IP packet, which it then processes normally. The whole process might have taken an hour, meaning the latency was 3600 seconds. The throughput for that single packet was \~0.42 bytes/second. However, the runner could have carried many packets or a larger amount of data simultaneously – the IPoH link’s capacity is limited mainly by the storage size and what the person can carry or handle. In many cases, to amortize the high latency, multiple packets (or even entire file bundles at higher protocol layers) would be sent together on one physical shipment.
+
+
+
+It is worth noting that, unlike typical network links, an IPoH link is **unidirectional at a time** (since one human can only carry data one way per trip, unless multiple people are used for a simultaneous exchange). To get data back from B to A, either the same human travels back with a new packet or another courier is used. This asymmetry means round-trip times are extremely large and possibly unpredictable. Protocols that expect quick acknowledgments may need adjustments or to operate in an asynchronous fashion.
+
+
+
+## 4. Fragmentation
+
+
+
+IPoH must support IP fragmentation and reassembly, as the physical constraints might require splitting a large IP datagram into smaller units for transport. In standard IP, fragmentation occurs when a packet is larger than the Maximum Transmission Unit (MTU) of a link. Each fragment is labeled with an identification number, offset, and flags indicating if more fragments follow, so that the receiver can reassemble the original packet.
+
+
+
+**MTU Considerations:** For a human-based link, the concept of MTU translates to the maximum data size a courier can or should carry in one piece. This might be very large if using modern digital media (a single flash drive can hold gigabytes, far exceeding the typical IP packet sizes, which are usually limited to 65,535 bytes for IPv4). In many cases, an IP datagram will easily fit on common media, meaning fragmentation at the IPoH link is not needed. However, there are scenarios where fragmentation could occur:
+
+
+
+* If the sender deliberately creates extremely large IP packets (perhaps for experimental purposes or using a protocol that allows jumbo payloads beyond typical IP limits).
+
+* If the chosen medium has limited capacity. For example, if using printed paper as the medium, one sheet might practically only hold a few thousand bytes in printed form (unless using dense encoding like QR codes). A very large packet might need to span multiple pages.
+
+* If there are **human comfort limits**: perhaps a policy that no single courier should carry more than N bytes of data to ease handling or reduce risk. In such cases, a large packet might be split among multiple couriers.
+
+
+
+**Fragmentation Process:** When fragmentation is needed on an IPoH link, the sending node (or an intermediate router preparing the packet for a human carrier) will split the IP datagram into fragments as per the IP protocol’s rules. Each fragment then is encapsulated onto a storage medium. There are a few strategies:
+
+
+
+* **Single Courier, Multiple Media:** One courier could carry multiple smaller storage devices, each containing one fragment. For example, a packet is split into 3 fragments, and the sender gives the courier three labeled USB sticks or envelopes, each with a fragment. The courier transports all of them to the destination, where they are reunited.
+
+* **Multiple Couriers, Parallel Delivery:** Alternatively, fragments could be assigned to different couriers to potentially expedite delivery (if, say, multiple people travel by different routes or vehicles). In this case, each courier might carry one or more fragments. This introduces the possibility that fragments arrive out of order or some arrive significantly earlier than others.
+
+* **Mixed approach:** A combination of the above – e.g., two couriers each carrying some of the fragments.
+
+
+
+In all cases, each fragment retains the original IP header’s identification value and appropriate offset and flags, so the destination knows how to reassemble them. It is crucial that all fragments eventually reach the same destination node for reassembly. Therefore, if using multiple couriers or routes, the routing must ensure they converge at the reassembly point (usually the final destination IP host, since IP fragmentation is typically reassembled at the end host, not at intermediate routers in IPv4; IPv6 normally doesn’t allow fragmentation by routers at all, but for the sake of IPoH we might allow controlled fragmentation at a gateway).
+
+
+
+**Reassembly:** The node responsible for reassembling (usually the destination host of the IP packet) will collect incoming fragments as they arrive from the various couriers or media. Reassembly in IPoH follows the standard IP reassembly algorithm:
+
+
+
+* Fragments are buffered until all pieces of the original datagram have arrived (as identified by matching IP ID field and source/destination and protocol).
+
+* If one or more fragments are missing or lost, the receiver cannot complete reassembly. In a normal IP network, a missing fragment might be assumed lost and eventually the partial datagram is discarded after a timeout (typically 60 seconds in many implementations). In IPoH, timeouts must be **much longer** due to the long transit times. A reassembly timeout might be on the order of days or weeks, depending on the expected transit times of the couriers. This is a significant deviation from typical IP stacks; implementations must be adjusted to allow such long waits, or the fragmentation must be coordinated to avoid indefinite delays.
+
+* If the reassembly timer expires (meaning some fragments didn’t show up in time), the receiver should discard the fragments it has and treat the datagram as lost. In a physical scenario, this might mean storing the incomplete data for a while and then securely erasing or returning it to sender as undeliverable.
+
+* If all fragments arrive, the receiver combines them in the correct order (using fragment offsets) to reconstruct the original full IP packet, which can then be processed normally.
+
+
+
+**Reliability of Fragments:** A major concern is that if any fragment is lost (e.g., a courier fails to deliver it, loses the storage medium, or it gets damaged), the entire IP datagram is lost. Higher-level protocols (like TCP or an application) would then have to retransmit the data in a new IP packet. Retransmitting a large data via IPoH is costly time-wise, so it might be prudent to minimize fragmentation. Wherever possible, sending smaller independent packets may be better than one huge packet that needs fragmentation. Alternatively, **forward error correction or redundancy** at a higher layer could be considered to mitigate fragment loss (for instance, sending an extra parity fragment that could allow reconstruction if one fragment is missing, analogous to RAID-like parity or erasure coding, though this is not part of standard IP).
+
+
+
+**Fragment Labeling for Humans:** It may be useful to label fragments for the benefit of the human carriers or handlers. For example, envelopes or drives might be marked “Fragment 1 of 3,” “Fragment 2 of 3,” etc., so that at the destination the staff knows to expect multiple parts. While the IP layer doesn’t need this (it has internal identifiers), operationally it helps ensure none are overlooked or misplaced. This is similar to how multipart deliveries in postal mail are handled.
+
+
+
+In summary, fragmentation is supported in IPoH, but it should be used cautiously. The system works best when each IP packet can be delivered as one unit. If fragmentation is needed, careful coordination is required to ensure all fragments follow the correct route and arrive within an acceptable timeframe for reassembly.
+
+
+
+## 5. Routing
+
+
+
+Routing in an IPoH network involves determining the physical path (or sequence of handoffs) that a human-carried packet will take from source to destination. In traditional IP networks, routing is handled by routers that forward packets hop-by-hop based on IP addresses and routing tables. In IPoH, **humans themselves can serve as “routers”** in the sense that a human might receive a packet and then pass it along to another human or device, gradually moving it toward the destination. There are two levels of routing to consider:
+
+
+
+* **Logical (IP-level) routing:** This is the end-to-end view. The source host knows (or determines) that the destination IP address is reachable via an IPoH service. It might simply treat the IPoH link as a single hop – for example, the source could have a routing table entry that says “for destination X, send via the Human interface.” This implies that somewhere, it knows how to get the packet to the correct human courier or dispatch center that will handle it. Alternatively, the source might forward the packet to a local router (over a normal network) which then offloads to a human courier for a segment of the journey.
+
+* **Physical (hop-by-hop) routing:** This refers to the actual path the human courier (or sequence of couriers) will travel. This is analogous to how a parcel is routed through a postal or courier system. For example, a packet might need to go from City A to City B. The human courier might not travel directly; it could involve going from a local office in City A to a transport hub, then another courier takes it from the hub to City B, then a local courier to the final address. Each leg of this journey is a “hop” in physical terms and could be considered a router hop in the IP sense if each transfer point decapsulates and re-encapsulates the packet.
+
+
+
+**Addressing and Forwarding:** In IPoH, every packet still carries the standard IP addresses of source and destination (e.g., 192.0.2.5 to 198.51.100.7 for IPv4, or analogous IPv6 addresses). These addresses alone do not tell a human where to go. Therefore, an IPoH system will require a directory or mapping service that links IP addresses (or IP subnets) to physical delivery coordinates:
+
+
+
+* For example, a database might say: *“The host with IP 198.51.100.7 is located at 1234 Main Street, Hometown, Country X.”* With this information, the sender (or the first courier) can plan the trip or at least the first hop.
+
+* Alternatively, it might map to an intermediate drop point: *“Traffic for IP prefix 198.51.100.0/24 should be delivered to the City B exchange office, which will then handle final delivery.”* This is similar to routing table entries, but each entry corresponds to a real-world location or courier handoff.
+
+
+
+We can imagine that the **first hop** in an IPoH route might be from the source host to a local “Human Internet Service Provider (H-ISP)” office, i.e., a dispatch center. At that center, a coordinator (or automated system) looks at the destination IP and consults routing information to decide how to forward it:
+
+
+
+* If the destination is local (same city or coverage area), they might assign a local courier to go directly.
+
+* If the destination is far, they might send it to another hub or to a long-distance courier (e.g., via airline).
+
+* This could repeat through multiple hubs, especially if the packet needs to travel internationally or to remote regions (though we explicitly avoid any illicit border crossings; this is assumed to be a legitimate delivery where proper customs or checks are done if needed, just like shipping goods).
+
+
+
+Each intermediate node in this chain plays the role of an IP router: it **receives the packet (via a human), inspects the destination address, and forwards it to the next hop (via another human or method)**. The difference is the forwarding is not instantaneous electronic switching but rather handing a physical package to the next courier. The decision process, however, can still use a routing table or even run routing protocols:
+
+
+
+* For instance, major hubs might exchange information (electronically or through regular updates) about network reachability in various locations, similar to how Internet Exchange Points operate for traditional traffic. This could be a manual or automated process.
+
+* If a certain route is down (e.g., a road is closed or a courier service is unavailable), the routing might be adjusted dynamically by sending the packet via an alternate city or holding it until a route is available (this is akin to buffering in networking, but on the scale of hours).
+
+
+
+**Routing Metrics:** In conventional networks, metrics like hop count, latency, or bandwidth influence routing. In IPoH, potential metrics might include:
+
+
+
+* **Estimated transit time:** e.g., delivering via Route A (direct flight) might take 1 day whereas Route B (land travel) might take 3 days.
+
+* **Cost:** physical delivery might incur monetary cost; perhaps one route is cheaper (like using postal mail) but slower, versus a faster but expensive courier.
+
+* **Reliability:** some routes might have higher risk of loss (maybe a remote area where things could get lost or delayed).
+
+* **Courier availability:** if no courier is immediately available for the optimal route, another route with an available courier might be chosen to avoid indefinite queuing.
+
+
+
+The routing algorithm could be as simple as **static configured routes** (“All packets to that region go this way”) or as complex as a dynamic protocol. Since IPoH is likely sparse, manual or semi-manual routing decisions might suffice initially. It is conceivable, however, to have a *Routing Protocol for IPoH* that nodes (hubs) use to announce, for example, “I can deliver to IP prefix X within Y days at cost Z” and another hub can choose accordingly – somewhat analogous to BGP announcements enriched with delivery time.
+
+
+
+**Example Scenario:** A packet from Host in Country A to Host in Country B:
+
+
+
+1. Host (or its router) gives the packet to a local courier depot, based on a default route for “outside local area” destinations.
+
+2. The depot sees destination is in Country B. It forwards the packet (on a disk) via international courier to a depot in Country B’s capital.
+
+3. That depot sees the specific city or region (perhaps by IP mapping or additional address info included) and sends it by a regional courier van to the city where Host B resides.
+
+4. In that city, a final local bike messenger takes it to Host B’s address.
+
+5. At each step, the packet may have been taken out and re-packaged or might remain sealed; logically, each hop is like a router hop.
+
+
+
+From IP’s perspective, this could be modeled either as a single long hop (if all intermediate handling is transparent to IP) or multiple hops if each depot acts as an IP router. The implementation can vary:
+
+
+
+* If each depot actually reads the IP packet and perhaps decides to encapsulate it anew (maybe to different media suited for next leg), then those depots are acting as IP routers. In this case, the IP packet’s TTL would decrement at each such depot (because it is a hop).
+
+* If the packet is sealed and never opened until final destination, then from IP’s view it was one giant hop and intermediate depots are not IP-layer devices but more like link-layer repeaters. However, fully sealed end-to-end might not be realistic if format or courier changes require handling the data.
+
+
+
+**Loop Avoidance and TTL:** The routing should avoid loops (a scenario where a packet goes in circles among depots). In practice, because these are physical deliveries with high cost, routes would be planned to not loop. The TTL mechanism (discussed in Section 6) would also prevent a packet from circulating indefinitely by eventually expiring it if something went wrong.
+
+
+
+**Multi-destination and Multicast:** It’s worth mentioning that IP multicast or broadcast over IPoH would be extremely inefficient: a human would have to carry multiple copies of a packet to deliver to multiple recipients. There could be a case for a courier carrying one packet and then making duplicates at a hub to send to different local recipients (like a distribution tree). That would mimic multicast distribution but done manually. However, IPoH is probably best suited for unicast or very small-scale distribution. A special case might be **geographically multicast content** (like delivering USB sticks with update data to many remote villages – each gets a copy of the same IP packet content). That scenario might be better handled at application level (replicating content for each destination) rather than IP layer multicast.
+
+
+
+In summary, routing in IPoH combines knowledge of IP address destinations with real-world logistics. Each “hop” corresponds to a segment of physical travel by a human (or a chain of humans). Traditional routing principles apply, but the decisions might be manual and based on different metrics (time, cost) than typical routers. The next section discusses how TTL is interpreted in this environment, which also relates to routing and loop prevention.
+
+
+
+## 6. TTL (Time to Live) Considerations
+
+
+
+In conventional IP, the **Time to Live (TTL)** field (in IPv4) or **Hop Limit** (in IPv6) serves to limit how long a packet can circulate in the network. It’s an 8-bit field that is decremented by one at each router hop; if it reaches zero, the packet is discarded and an ICMP Time Exceeded message is usually sent back to the sender. This prevents packets from looping endlessly due to routing errors.
+
+
+
+In the context of IP over Humans, the concept of TTL needs reinterpretation for two reasons:
+
+
+
+1. The “hops” in IPoH are very different (human/physical hops rather than router hops), and
+
+2. The *time scale* of IPoH deliveries is huge compared to normal networks, so the meaning of TTL as a time or hop count may need adjustment.
+
+
+
+**Hop-based TTL:** If we apply the standard hop-based decrement semantics, each time a packet is handed from one human or depot to another (i.e., each intermediate forwarding), we could consider that one hop and decrement the TTL by 1. This would work similarly to an IP router chain. For example, if a packet goes through 4 courier hops (source to local depot, depot to international hub, hub to local depot, local depot to destination), that’s 4 hops; if the packet’s initial TTL was, say, 64, it would end up as 60 by arrival. As long as routes are reasonably short (in terms of number of handoffs), this is fine. Most IPoH routes might involve only a handful of hops (as human networks are not as richly meshed as the Internet). So the hop-limit aspect of TTL could remain useful primarily to avoid unlikely routing loops. If there were a misconfiguration and a packet bounced between two hubs repeatedly, TTL would eventually drop to 0 and then the packet would be discarded. In such a case, ideally an ICMP Time Exceeded (TTL expired) message should be generated to inform the sender, though generating that message in IPoH means physically sending a notification back (possibly via another human or via a quicker channel like email if available). We discuss such confirmations in the next section.
+
+
+
+**Time-based TTL (Expiration):** The original meaning of “Time to Live” was literally a time limit (in seconds) for a packet, but in modern IP it’s purely a hop count. In IPoH, **time** becomes a very relevant factor because deliveries can take so long that a packet might become stale or irrelevant by the time it arrives. For example, if an IP packet contains a request that makes sense only in the next hour, delivering it days later is pointless. Therefore, it’s useful to impose an actual expiry time. We can leverage the TTL field to represent a *time-to-live in real world time units*, if agreed by the endpoints:
+
+
+
+* One approach is to treat the TTL field as roughly “number of hours or days” the packet should live. For example, a sender might set TTL = 24 to indicate “this packet is not worth delivering after 24 hours.” Each hour in transit, an intermediate node could decrement the TTL by 1 (though this would require intermediate nodes to measure passage of time, which a human or handling system can do).
+
+* Alternatively, use the field as a hop count but calibrated to typical scenarios: for instance, each hop might be assumed to take up to a day, so a TTL of 7 could imply about a week’s validity, etc. This is not precise, but it gives a rough bound.
+
+
+
+Given the TTL field is 8 bits (max 255), if we used it as straight hours, 255 hours (\~10.6 days) might be too short for some global deliveries. If used as days, 255 days (\~8.5 months) is probably sufficient for even extremely slow deliveries (and if it’s beyond that, likely the content is outdated anyway). It might be practical to define that in IPoH, **TTL is interpreted as days** by default. So a TTL of, say, 5 would mean the packet should not be delivered if it’s older than 5 days. Of course, intermediate nodes need to know the current age of the packet; this might be tracked by including a timestamp when the packet was dispatched, or by decreasing the TTL each day held. This is a layer above pure IP, since standard IP doesn’t have a field for “packet age,” but an IPoH handling system could manage that.
+
+
+
+**Human Life-Span Consideration:** It’s worth noting that if we interpret TTL in the literal sense of a packet’s *lifespan*, a human carrier on average has a lifetime on the order of decades. An observation is that the “carrier’s TTL” might be considered \~80 years (average human life expectancy). Obviously, we do not expect any packet to be in transit that long. However, this perspective highlights that a packet hand-carried by a single person could, in principle, survive in transit until that person’s end-of-life if they never encountered the destination sooner (an extremely pathological routing scenario!). Therefore, we rely on the protocol to ensure packets timeout well before such extremes. In other words, **if a packet hasn’t made it within a reasonable fraction of a human lifetime, it’s safe to say it expired.**
+
+
+
+**TTL Expiry Handling:** When a packet’s TTL expires in IPoH, it means the packet should be discarded. The node (or person) noticing the TTL is zero should not attempt further delivery. For instance, if a courier arrives at a hub and the hub’s system sees the TTL is now 0 (or the packet’s timestamp shows it’s too old), they will refrain from sending it onward. Ideally, they would inform the original sender that the delivery failed due to TTL expiration:
+
+
+
+* In IP terms, they would generate an ICMP Time Exceeded message addressed back to the source IP. However, sending this ICMP message itself poses the same challenge – it would have to go back via the IPoH network or any available network. If the original sender is reachable via a normal internet connection or email, the hub might send a notification through alternate means (this strays from pure IP, but is pragmatic).
+
+* Alternatively, the expired packet (or a note thereof) could be returned to the sender by a human, similar to postal mail returning undeliverable parcels. This is effectively the physical equivalent of an ICMP error: the sender gets their “package” back with a note “TTL expired – not delivered.”
+
+
+
+**Expanding Ring Search and Traceroute:** In normal IP networks, tools like traceroute work by sending packets with gradually increasing TTL to discover the path (each router that drops a packet due to TTL sends back an ICMP, revealing its presence). In an IPoH scenario, doing an expanding TTL search would be impractical:
+
+
+
+* If you send a packet with TTL=1 and it doesn’t reach the destination, you might or might not ever get a notification back, and you’ve wasted a courier trip for a packet that intentionally won’t get there.
+
+* The intermediate node that drops it at TTL 0 might not even bother sending a return message because of the overhead and delay. By the time you find out where it got, months could pass.
+
+* Therefore, traceroute over IPoH is not a useful diagnostic tool. Discovering the route is better done by communicating with the service providers or using prior knowledge of the network topology rather than TTL-based probing.
+
+
+
+In summary, TTL in IPoH can still serve to prevent undeliverable packets from persisting forever and to avoid infinite loops. The recommended practice is:
+
+
+
+* Use TTL as a **time limit** indicator (interpreted in coarse units like days) for how long the packet should be valid.
+
+* Also decrement TTL per hop to maintain compatibility with the notion of hop count.
+
+* Ensure that any TTL expiry results in disposal of the packet, and if possible, a notification to the sender.
+
+* Recognize that the default maximum TTL (255 in IPv4) sets an upper bound on delivery time if used as days (255 days) unless extended by some future protocol.
+
+
+
+The dual use (time vs hop) could theoretically conflict (e.g., a packet could expire by aging out before using up its hop count). To avoid confusion, IPoH implementations could agree on one interpretation explicitly. Given the nature of the network, treating TTL as an expiration timer is arguably more important, since loops are unlikely but long delays are inherent. For safety, we could say: **whichever condition is met first (exceeded hops or exceeded time) should trigger expiry.**
+
+
+
+Next, we discuss how once a packet does (hopefully) arrive, the delivery can be confirmed.
+
+
+
+## 7. Delivery Confirmation
+
+
+
+In the standard IP protocol, there is no built-in end-to-end acknowledgment at the IP layer – IP is connectionless and unreliable, leaving reliability to transport protocols like TCP or application layers. However, in a high-latency, high-cost network like IPoH, it is often desirable to have positive confirmation that a packet reached its destination (or at least reached the intended next hop). This section describes mechanisms for delivery confirmation in IPoH, which can be seen as analogous to acknowledgments or receipts.
+
+
+
+There are a few possible approaches to confirm delivery:
+
+
+
+**7.1. Higher-Layer Protocol Acknowledgments:** The simplest case is to rely on a transport protocol (e.g., TCP) or application to provide an acknowledgment. For example, if the IPoH network is used to transfer a file via an application-level protocol, that protocol might include a return receipt once the file (or packet) is received. However, such an acknowledgment would itself need to travel back, presumably via IPoH or any available channel. If via IPoH, that means sending a return packet with the same challenges of delay. If an alternative faster network exists in one direction, that could be used opportunistically (e.g., maybe the destination has internet connectivity to send a small ACK by email or satellite, whereas the data came via physical means because maybe upload capacity was limited). In fully disconnected scenarios, though, relying on higher-layer ACKs means you effectively wait for another human-carried packet in reverse.
+
+
+**7.2. Phone Call-Based Acknowledgment
+
+In deployments where digital connectivity is limited but not entirely absent, a voice-based acknowledgment via telephone MAY serve as a lightweight and expedient alternative to a full IP-layer or application-layer return transmission. This approach presumes that either the courier or the recipient has access to a functional telephony service upon delivery.
+
+Upon successful receipt and verification of the data at the destination node, an authorized party MAY initiate a phone call to the original sender or designated contact to confirm delivery. The content of the acknowledgment SHOULD minimally include:
+
+A verbal confirmation of successful reception;
+
+A unique delivery identifier (e.g., courier ID, delivery manifest number, or checksum tag);
+
+Time and location of acknowledgment;
+
+Identity of the confirming individual (if different from courier).
+
+To ensure security, the call MAY be placed using a pre-approved number list, and a passphrase or challenge-response MAY be exchanged to authenticate the caller’s identity. If call recording is permitted by policy, such a record MAY serve as a legally or operationally sufficient receipt.
+
+Phone-based acknowledgments do not substitute for digital integrity verification; the receiving node MUST still verify hashes or signatures locally. However, the voice acknowledgment provides rapid out-of-band confirmation and MAY reduce perceived latency in time-sensitive operations.
+
+In air-gapped or intentionally disconnected environments, such a method provides a practical halfway point between full return-courier acknowledgment and higher-layer digital handshakes.
+```
+
+- *Trade-off:* Having the courier wait for an immediate acknowledgment might increase the courier’s idle time at destination but ensures a quicker round-trip. Alternatively, the courier could drop off the packet and leave, and another courier (or the postal system) could carry back the acknowledgment later.
+
+```
+
+
+
+**7.3. Physical Confirmation Receipts:** Outside the IP protocol itself, one could use a more human-oriented approach: have the destination sign a **delivery receipt** (on paper or digitally) when they receive the data, and then send that receipt back to the sender. This is analogous to certified mail in postal systems. For instance, the storage medium could include a return envelope or a form that the receiver signs. That signed form could be physically mailed back to the sender as proof of delivery. While this is not an electronic acknowledgement, it might be acceptable in scenarios where human administrative confirmation suffices. It doesn’t integrate into networking software automatically, but it provides assurance to the sender.
+
+
+
+**7.4. Automated Handoff Logging:** In a more automated IPoH infrastructure, each hop or depot could log the packet’s progress (potentially updating a tracking database accessible to the sender). For example, when the packet leaves the source, it’s marked “in transit.” When it arrives at an intermediate hub, that hub could (if they have any network connectivity or even phone) send a short status update like “Packet for Host B arrived at Hub X.” Similarly, final delivery could trigger a notification. While this is not exactly at the IP protocol layer, it leverages any available communication (like SMS, phone, or intermittent internet) to give the sender an idea of where the packet is. This is akin to tracking a package in a courier service. It confirms delivery implicitly when the final status is reached.
+
+
+
+Given this is an RFC-style technical document, a straightforward approach to specify is the ICMP-based one, as it fits within IP itself:
+
+
+
+* We could define an IPoH implementation should support responding to ICMP Echo requests. So a user can “ping” a remote host via IPoH to test connectivity; the ping might take days, but if a reply comes back, you know the path works.
+
+* Possibly define a new ICMP code for “Delivered OK” that the destination could initiate even without a prior Echo request, but that’s effectively the same as an Echo Reply with no matching request (which might be ignored by some stacks). It’s simpler to just use ping or a similar request/response protocol.
+
+
+
+**Reliability of ACKs:** Just as the original packet might get lost or delayed, so can an acknowledgment. The sender cannot be entirely certain the absence of an ACK means failure, unless a timeout much larger than round-trip estimate passes. With round-trips being so large, timeouts could be on the order of days or weeks. This again might be handled outside the protocol, by human intuition or alternate queries (“It’s been a month, maybe the packet was lost or is still coming”).
+
+
+
+**Partial Delivery Confirmation:** If fragmentation was used and only some fragments arrive, the destination might want to inform the sender that a partial delivery occurred but was incomplete. Standard IP doesn’t have a mechanism for “got some fragments, waiting for others.” That is probably too granular for IPoH; instead, the outcome is either “packet fully delivered” or “not delivered.” If not delivered due to missing fragments, that is essentially a failure.
+
+
+
+**Security of Confirmation:** We should also consider verifying that the confirmation is legitimate – e.g., one might sign the acknowledgments to avoid spoofing. This leads into security considerations in the next section, but for now: an attacker could potentially send a fake ACK to trick the sender into thinking a packet arrived when it didn’t (though in IPoH, that attacker would have to either intercept and replace physical media or somehow send a surprise packet back – not trivial without access to the route).
+
+
+
+In conclusion, IPoH can implement delivery confirmation, but it is not inherent to IP. We encourage one of two primary modes:
+
+
+
+* Use a **return packet** via IPoH (like ICMP Echo Reply or an application-level ACK) carried by a returning or second courier.
+
+* Or use an **out-of-band confirmation** akin to a signed receipt or tracking notification.
+
+
+
+The exact method may depend on the deployment scenario (e.g., a formal data mule service might have built-in tracking, whereas an ad-hoc human delivery might just rely on a phone call: “Hey, I gave your USB drive to Bob at the lab, he has it now.” – a perfectly valid human-layer ACK).
+
+
+
+## 8. Security Considerations
+
+
+
+Using human carriers as the transport medium for IP packets introduces a number of security considerations, both familiar and novel. We outline the major security issues and potential mitigations:
+
+
+
+**8.1. Confidentiality:** Unlike closed wires or encrypted radio links, a physical storage medium carried by a human can be lost, stolen, or accessed by unintended parties during transit. Therefore, to ensure confidentiality of the IP packet’s content, strong encryption is recommended. Standard end-to-end encryption at higher layers (e.g., TLS, IPsec, or application encryption) can protect the data such that even if someone obtains the storage device, they cannot read the packet’s payload. In addition, if any sensitive information is in the IP header (usually not, except maybe addresses which are typically not secret), that would be exposed. One might encapsulate the entire IP packet (header and payload) within an encrypted container before giving it to the courier. This would essentially create a VPN-like tunnel over the human carrier. For example, using IPsec in tunnel mode: the original IP packet is encrypted and wrapped in another IP header that might correspond to the courier service endpoints. However, if the courier service endpoints aren’t networked, a simpler approach is to just encrypt the file on the storage medium (like putting the packet in an encrypted zip file or using full-disk encryption on a drive). The key exchange for such encryption must happen beforehand between sender and intended receiver (just as any secure communication setup).
+
+
+
+**8.2. Integrity:** Data integrity can be threatened by accidental damage or malicious tampering. A USB drive could become corrupted, or someone might alter the data on it during transit. To guard against this, digital signatures or message authentication codes (MACs) should be used. The sender can compute a cryptographic hash or MAC for the packet and the receiver can verify it. If encryption as above is used, many encryption schemes (e.g., authenticated encryption) provide integrity checking inherently. Alternatively, including a known strong checksum with the data would allow the receiver to detect if the packet was modified or corrupted in transit. If integrity fails, the packet should be discarded as invalid.
+
+
+
+**8.3. Authentication and Access Control:** We must consider whether the human couriers or intermediate handlers should have any ability to access or modify the data. Ideally, they are **untrusted** carriers, meaning the system is designed under the assumption they might be curious or even malicious. By encrypting the content, we prevent them from learning anything sensitive. Additionally, one might want to ensure that only the intended recipient can load the packet from the medium. This could be done by using encryption tied to the recipient’s keys, or by physically securing the media (though physical security is tricky – e.g., locked cases can be broken given enough effort). From a networking standpoint, it may also be necessary to authenticate the source of the packet to the destination (so the destination knows it indeed came from the claimed sender and hasn’t been swapped). Digital signatures on the packet or on a higher-layer message can fulfill this, providing non-repudiation as well.
+
+
+
+**8.4. Privacy:** Beyond confidentiality of content, there’s the privacy of metadata. A physical packet typically will have labels like the destination address or perhaps the source. These labels might reveal who is communicating with whom, even if the content is encrypted. In sensitive scenarios, even this could be information one might want to protect (just as IP addresses can be sensitive in normal networks). However, with physical transport, completely hiding addresses is hard because the courier needs to know where to go. One partial mitigation is to use an **overlay network**: for example, the sender doesn’t put the final destination’s address on the package, but instead addresses it to a trusted hub or agent, who then forwards internally. This way, a casual observer or an adversary intercepting the package in transit sees only the hub address, not the end destination. This is analogous to mix networks or onion routing but done physically. The trade-off is added delay and the necessity of trusted intermediaries to know the next step.
+
+
+
+**8.5. Physical Security and Safety:** The human element introduces risks to both data and the individuals:
+
+
+
+* A courier carrying high-value data might be targeted for theft or espionage. Unlike data in a fiber cable which cannot be easily “mugged,” a person can be. Ensuring couriers are aware of this risk and possibly providing discreet transport methods is important. For extremely sensitive packets, one might employ security escorts or use covert means (e.g., concealing the storage device so it’s not obvious they carry data).
+
+* The safety of the courier should be considered: no packet is worth endangering a person’s life or well-being. Protocol-wise, this means we might avoid routing through dangerous areas or require that couriers can decline a job if it’s unsafe. While this is outside typical RFC scope, it’s a real-world consideration for any human-based network.
+
+* There’s also a reverse concern: a malicious courier might not just leak data, but could inject false data or introduce malware. For example, if a courier swaps the legitimate USB drive with another that has malicious packets or malware-laced firmware, the receiver could be compromised. To mitigate this, endpoints should treat incoming media cautiously: ideally only read data in a safe manner (e.g., mount as read-only, scan for threats if interpreting beyond IP, etc.). Using cryptographic validation as mentioned will prevent accepting bogus packets, but it might not prevent an attempt to exploit the reading process itself. Operationally, using simple well-understood media formats and strict handling (like only plugging the drive into a designated secure computer) can reduce risk.
+
+
+
+**8.6. Eavesdropping and “Stool Pigeons”:** In RFC 2549 (IPoAC with QoS), it humorously notes “There are privacy issues with stool pigeons”, implying that some carriers might betray secrets. By analogy, a “stool pigeon” in human terms could be an informant or someone who copies data secretly. A courier could conceivably copy the data on the medium (especially if not encrypted) and keep a copy even after delivery, potentially handing it to an unauthorized third party. Strong encryption again is the defense here – if the data is encrypted and the keys are not available to the courier, copying it yields nothing useful. If extremely high security is needed, one might even add mechanisms like tamper-evident seals on the storage device or cases that destroy the data if opened improperly (though these get into hardware solutions beyond networking).
+
+
+
+**8.7. Denial of Service:** An adversary could try to sabotage the IPoH network by intercepting or destroying packets in transit. This is analogous to cutting cables or jamming radios in other contexts. If a malicious party targeted couriers (stealing or discarding the storage media they carry), it could cause packet loss or long delays. There is no absolute prevention other than making such attacks difficult (e.g., using unpredictable routes or secure hand-offs). On the protocol side, detecting such losses and possibly rerouting/retrying is key. This again comes to perhaps sending duplicate packets via multiple couriers if high assurance is needed (trading cost for reliability). Also, if a particular region or route is prone to attack, routing around it (even if slower) would be a strategy.
+
+
+
+**8.8. Trusted vs Untrusted Nodes:** If IPoH involves certain fixed nodes (like hub offices or switch points), these can be secured physically and by policy. One might require background checks for couriers, secure facilities for handling the media, and logs of who handled what and when. These are procedural security measures that complement technical ones. From a network architecture perspective, these hubs can be considered semi-trusted routers. They might even perform functions like virus scanning or content inspection if permitted (though if content is encrypted, they cannot inspect content – which is usually desirable for end-to-end security).
+
+
+
+**8.9. Malware on Physical Media:** While not directly a network protocol issue, there’s the risk that a storage device used in IPoH could carry not just the intended IP packet but also malicious software (perhaps in its firmware or extra files). For instance, a USB drive could be a vector for a computer virus if plugged in. It’s recommended that endpoints use dedicated, known-clean media and have strict processes for reading them. For example, an endpoint might boot a machine from a trusted live OS to read the incoming data, to avoid any autorun or similar issues. This is analogous to safe handling of any external data device.
+
+
+
+In summary, the security considerations for IPoH strongly recommend:
+
+
+
+* **Encrypting and authenticating** the data in transit (making the human carrier a “blind courier” who cannot decipher the content or alter it undetectably).
+
+* Using **tamper-evident or tamper-resistant packaging**, both digitally (signatures) and physically (sealed envelopes or cases).
+
+* Trusting no one blindly: design assuming that any courier or intermediary might be compromised, thus layering security end-to-end between the actual communication endpoints.
+
+* Ensuring compliance with any legal requirements (data protection, export controls on cryptography, etc.) since physically moving data could cross jurisdictions (but again, we assume all such movement is done lawfully with any required approvals).
+
+
+
+No new protocol vulnerabilities are introduced at the IP level by using humans, but the existing vulnerabilities of data in transit are amplified due to the exposure of the media. By applying well-known security best practices, IPoH can be made as secure as – or even more secure than – conventional networks (for example, a well-encrypted IPoH packet is practically immune to remote hacking – one would have to physically intercept it, which is a higher barrier in many cases).
+
+
+
+## 9. IANA Considerations
+
+
+
+This document defines no new protocol numbers, port numbers, or other IANA-managed parameters. All functionality is achieved using existing IP mechanisms (with semantic adaptations). Therefore, there are no actions required of IANA at this time.
+
+
+
+*However*, for theoretical completeness, one might imagine reserving a link-layer protocol number or an Interface Type for “Human-carrier” in some registry (for instance, in an imaginary registry of physical link types). Such assignments are not formally requested here, as they are outside the current standard practices.
+
+
+
+In summary, there are no IANA considerations for this document.
+
+
+
+## 10. References
+
+
+
+**Normative References:**
+
+
+
+* **\[RFC1149]** Waitzman, D. (1990). *A Standard for the Transmission of IP Datagrams on Avian Carriers*. RFC 1149, IETF. (An April 1st RFC describing IP over carrier pigeons, which inspired alternative physical transport methods.)
+
+
+
+* **\[RFC2549]** Waitzman, D. (1999). *IP over Avian Carriers with Quality of Service*. RFC 2549, IETF. (A follow-up to RFC 1149 introducing quality of service for bird-carried IP; contains relevant humor and insights, e.g., carriers’ TTL of 15 years.)
+
+
+
+* **\[RFC6214]** Carpenter, B., & Hinden, R. (2011). *Adaptation of RFC 1149 for IPv6*. RFC 6214, IETF. (Demonstrates how IPv6 datagrams can be transmitted via the same avian carrier principles; by extension IPv6 can also be used for IPoH.)
+
+
+
+**Informative References:**
+
+
+
+* **Tanenbaum81** Tanenbaum, A. S. (1981). *Computer Networks (1st ed.)*. Prentice Hall. (Poses a problem to calculate the bandwidth of a St. Bernard dog carrying floppy disks, highlighting the concept that physical transport can have high throughput; also source of the paraphrased quote about the station wagon of tapes.)
+
+
+
+* **Sneakernet** Wikipedia. *Sneakernet*. Retrieved 2025. (Background on transferring data by physical means, including historic examples and the famous quotes relating to bandwidth vs latency. Although not an RFC, it provides context for real-world uses of offline data transport.)
+
+
+
+* **IPoAC-Bergen** Haugseti, Ø., et al. (2001). *CPIP Implementation Report*. Bergen Linux User Group. (Documented a real implementation of IP over Avian Carriers – nine ping packets were sent via pigeons. This demonstrates that whimsical IP transmission methods can work, and by analogy, IPoH is plausible given sufficient patience.)
+
+
+
+* **Delay-Tolerant Networking** Fall, K. (2003). *A Delay-Tolerant Network Architecture for Challenged Internets*. SIGCOMM. (Not specific to IPoH, but provides principles for networks with extreme latency and disruption, into which category IPoH falls. Concepts like custody transfer in DTN are analogous to handing data to a courier.)
+
+
+
+The above references and examples illustrate the technical and humorous foundations on which IP over Humans is built. This document, while light-hearted in tone, adheres to the standard RFC style and is intended to be read with a sense of technical curiosity and an appreciation for the flexibility of the Internet Protocol.
+
